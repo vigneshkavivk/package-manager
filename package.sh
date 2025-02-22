@@ -113,7 +113,7 @@ install_precommit_checkov() {
     echo "Checkov version: $(checkov --version 2>/dev/null || echo 'Unknown')"
     deactivate
     echo "Pre-commit and Checkov installed in virtual environment at $PRECOMMIT_VENV"
-
+    
     # Create pre-commit config files
     cat > "$HOME/.pre-commit-config.yaml" <<EOL
 repos:
@@ -255,7 +255,7 @@ repos:
         types: [file]
         files: ".*\\.ya?ml$"  # Ensures it checks YAML inside charts/templates
         args: ["-v"]  # Added verbose flag
-        pass_filenames: false 
+        pass_filenames: false
 EOL
 
     cat > "$HOME/.pre-commit-hooks.yaml" <<EOL
@@ -457,31 +457,16 @@ EOL
     echo "Pre-commit configuration files created."
 }
 
-# Show installed versions
-show_installed_versions() {
-    echo -e "\nInstalled Versions:"
+# Uninstall all packages and clean up
+uninstall_packages() {
+    echo "Removing all installed packages..."
     for package in "${PACKAGES[@]}"; do
-        case "$package" in
-            awscli)
-                version=$(aws --version 2>/dev/null | awk '{print $1}' || echo "Unknown")
-                ;;
-            opa)
-                version=$(opa version 2>/dev/null || echo "Unknown")
-                ;;
-            helm)
-                version=$(helm version --short 2>/dev/null || echo "Unknown")
-                ;;
-            kubectl)
-                version=$(kubectl version --client --short 2>/dev/null || echo "Unknown")
-                ;;
-            *)
-                version=$($package --version 2>/dev/null || echo "Unknown")
-                ;;
-        esac
-        echo "$package version: $version"
+        sudo apt-get remove --purge -y "$package" 2>/dev/null || echo "$package not found"
     done
-    echo "Pre-commit version: $(source $PRECOMMIT_VENV/bin/activate && pre-commit --version 2>/dev/null || echo 'Unknown')"
-    echo "Checkov version: $(source $PRECOMMIT_VENV/bin/activate && checkov --version 2>/dev/null || echo 'Unknown')"
+    sudo rm -rf "$PRECOMMIT_VENV"
+    sudo apt-get autoremove -y
+    sudo apt-get clean
+    echo "All installed packages and dependencies have been removed."
 }
 
 # Detect OS
@@ -502,12 +487,7 @@ case "$choice" in
         show_installed_versions
         ;;
     2)
-        echo "Removing all installed packages..."
-        for package in "${PACKAGES[@]}"; do
-            sudo apt-get remove --purge -y "$package" 2>/dev/null || echo "$package not found"
-        done
-        rm -rf "$PRECOMMIT_VENV"
-        sudo apt-get autoremove -y
+        uninstall_packages
         ;;
     *)
         echo "Invalid option. Exiting..."
