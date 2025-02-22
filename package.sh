@@ -1,11 +1,14 @@
 #!/bin/bash
 
 # Define package names
-PACKAGES=("terraform" "awscli" "gitbash" "terragrunt" "opa" "python" "checkov" "vscode" "helm" "kubectl" "rsync" "zip" "unzip")
+PACKAGES=("terraform" "awscli" "git" "terragrunt" "opa" "python3" "helm" "kubectl" "rsync")
 
 LOG_FILE="install_log.txt"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
+PRECOMMIT_VENV="$HOME/precommit_venv"
+
+# Detect OS
 detect_os() {
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         OS_TYPE="linux"
@@ -18,6 +21,7 @@ detect_os() {
     fi
 }
 
+# Install Packages
 install_package() {
     if command -v "$1" &>/dev/null; then
         echo "$1 is already installed. Skipping..."
@@ -29,68 +33,48 @@ install_package() {
             sudo apt-get update -y
             case "$1" in
                 terraform)
-                    echo "Installing Terraform on Linux..."
+                    echo "Installing Terraform..."
                     curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
                     echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
                     sudo apt-get install -y terraform
                     ;;
                 awscli)
-                    echo "Installing AWS CLI on Linux..."
+                    echo "Installing AWS CLI..."
                     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
                     unzip -o awscliv2.zip
                     sudo ./aws/install
                     rm -rf awscliv2.zip aws/
                     ;;
-                gitbash)
-                    echo "Installing Git on Linux..."
+                git)
+                    echo "Installing Git..."
                     sudo apt install -y git
                     ;;
                 terragrunt)
-                    echo "Installing Terragrunt on Linux..."
+                    echo "Installing Terragrunt..."
                     curl -LO https://github.com/gruntwork-io/terragrunt/releases/latest/download/terragrunt_linux_amd64
                     sudo install -m 755 terragrunt_linux_amd64 /usr/local/bin/terragrunt
                     ;;
                 opa)
-                    echo "Installing OPA Gatekeeper on Linux..."
+                    echo "Installing OPA..."
                     curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
                     sudo install -m 755 opa /usr/local/bin/opa
                     ;;
-                python)
-                    echo "Installing Python on Linux..."
-                    sudo apt install -y python3 python3-pip
-                    ;;
-                checkov)
-                    echo "Installing Checkov in Docker on Linux..."
-                    alias check='docker run --rm -v $(pwd):/tf -w /tf bridgecrew/checkov'
-                    alias terraform-plan='terraform plan -out=tfplan && terraform show -json tfplan > tfplan.json && check -f tfplan.json'
-                    echo "alias check='docker run --rm -v \$(pwd):/tf -w /tf bridgecrew/checkov'" >> ~/.bashrc
-                    echo "alias terraform-plan='terraform plan -out=tfplan && terraform show -json tfplan > tfplan.json && check -f tfplan.json'" >> ~/.bashrc
-                    source ~/.bashrc
-                    ;;
-                vscode)
-                    echo "Installing VS Code on Linux..."
-                    sudo apt install -y code
+                python3)
+                    echo "Installing Python..."
+                    sudo apt install -y python3 python3-pip python3-venv
                     ;;
                 helm)
-                    echo "Installing Helm on Linux..."
+                    echo "Installing Helm..."
                     curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
                     ;;
                 kubectl)
-                    echo "Installing kubectl on Linux..."
+                    echo "Installing kubectl..."
                     curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
                     sudo install -m 755 kubectl /usr/local/bin/kubectl
                     ;;
                 rsync)
-                    echo "Installing rsync on Linux..."
+                    echo "Installing rsync..."
                     sudo apt install -y rsync
-                    ;;
-                zip)
-                    echo "Installing zip on Linux..."
-                    sudo apt install -y zip
-                    ;;
-                unzip)
-                    echo "Installing unzip on Linux..."
-                    sudo apt install -y unzip
                     ;;
                 *)
                     echo "Unknown package: $1"
@@ -116,63 +100,23 @@ install_package() {
     esac
 }
 
-show_installed_versions() {
-    echo -e "\nInstalled Versions:"
-    for package in "${PACKAGES[@]}"; do
-        if command -v "$package" &>/dev/null; then
-            echo "$package version: $($package --version 2>/dev/null || echo 'Unknown')"
-        else
-            echo "$package not found"
-        fi
-    done
-}
+# Install Pre-commit and Checkov in Separate Virtual Environment
+install_precommit_checkov() {
+    echo "Setting up separate virtual environment for pre-commit and checkov..."
+    if [ ! -d "$PRECOMMIT_VENV" ]; then
+        python3 -m venv "$PRECOMMIT_VENV"
+    fi
+    source "$PRECOMMIT_VENV/bin/activate"
+    pip install --upgrade pip
+    pip install pre-commit checkov pyyaml
+    echo "Pre-commit version: $(pre-commit --version 2>/dev/null || echo 'Unknown')"
+    echo "Checkov version: $(checkov --version 2>/dev/null || echo 'Unknown')"
+    deactivate
+    echo "Pre-commit and Checkov installed in virtual environment at $PRECOMMIT_VENV"
 
-# Detect OS
-detect_os
-
-echo "Detected OS: $OS_TYPE"
-
-install_package "$1"
-show_installed_versions
-
-# Install pre-commit and add configuration
-echo "Installing pre-commit..."
-pip install pre-commit
-
-cat > .pre-commit-config.yaml <<EOL
+    # Create pre-commit config files
+    cat > "$HOME/.pre-commit-config.yaml" <<EOL
 repos:
-  - repo: https://github.com/bridgecrewio/checkov
-    rev: "3.2.372"  # Use a stable version for production
-    hooks:
-      - id: checkov
-        name: "Checkov Terraform Scan"
-        entry: python3 -c "import os; os.system('checkov -d .') or os.system('checkov -f .')"
-        language: python
-        language: system
-        types: [file]
-        files: ".*\\.tf$"
-        args: ["-v"]
-        pass_filenames: false
-
-      - id: checkov
-        name: "Checkov YAML Scan"
-        entry: python3 -c "import os; os.system('checkov -d .') or os.system('checkov -f .')"
-        language: python
-        language: system
-        types: [file]
-        files: ".*\\.ya?ml$"
-        args: ["-v"]  # Added verbose flag
-        pass_filenames: false
-
-      - id: checkov
-        name: "Checkov Helm Chart Scan"
-        entry: python3 -c "import os; os.system('checkov -d .') or os.system('checkov -f .')"
-        language: python
-        language: system
-        types: [file]
-        files: ".*\\.ya?ml$"  # Ensures it checks YAML inside charts/templates
-        args: ["-v"]  # Added verbose flag
-        pass_filenames: false
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
@@ -278,9 +222,43 @@ repos:
         entry: htmlhint
         language: system
         types: [text]
-        files: \.html$EOL
+        files: \.html$
 
-cat > .pre-commit-hooks.yaml <<EOL
+  - repo: https://github.com/bridgecrewio/checkov
+    rev: "3.2.372"  # Use a stable version for production
+    hooks:
+      - id: checkov
+        name: "Checkov Terraform Scan"
+        entry: python3 -c "import os; os.system('checkov -d .') or os.system('checkov -f .')"
+        language: python
+        language: system
+        types: [file]
+        files: ".*\\.tf$"
+        args: ["-v"]
+        pass_filenames: false
+
+      - id: checkov
+        name: "Checkov YAML Scan"
+        entry: python3 -c "import os; os.system('checkov -d .') or os.system('checkov -f .')"
+        language: python
+        language: system
+        types: [file]
+        files: ".*\\.ya?ml$"
+        args: ["-v"]  # Added verbose flag
+        pass_filenames: false
+
+      - id: checkov
+        name: "Checkov Helm Chart Scan"
+        entry: python3 -c "import os; os.system('checkov -d .') or os.system('checkov -f .')"
+        language: python
+        language: system
+        types: [file]
+        files: ".*\\.ya?ml$"  # Ensures it checks YAML inside charts/templates
+        args: ["-v"]  # Added verbose flag
+        pass_filenames: false 
+EOL
+
+    cat > "$HOME/.pre-commit-hooks.yaml" <<EOL
 -   id: shellcheck
     name: shellcheck
     description: Test shell scripts with shellcheck
@@ -476,21 +454,62 @@ cat > .pre-commit-hooks.yaml <<EOL
     stages: [pre-commit, pre-push, manual]
     minimum_pre_commit_version: 3.2.0
 EOL
+    echo "Pre-commit configuration files created."
+}
 
-pre-commit install
+# Show installed versions
+show_installed_versions() {
+    echo -e "\nInstalled Versions:"
+    for package in "${PACKAGES[@]}"; do
+        case "$package" in
+            awscli)
+                version=$(aws --version 2>/dev/null | awk '{print $1}' || echo "Unknown")
+                ;;
+            opa)
+                version=$(opa version 2>/dev/null || echo "Unknown")
+                ;;
+            helm)
+                version=$(helm version --short 2>/dev/null || echo "Unknown")
+                ;;
+            kubectl)
+                version=$(kubectl version --client --short 2>/dev/null || echo "Unknown")
+                ;;
+            *)
+                version=$($package --version 2>/dev/null || echo "Unknown")
+                ;;
+        esac
+        echo "$package version: $version"
+    done
+    echo "Pre-commit version: $(source $PRECOMMIT_VENV/bin/activate && pre-commit --version 2>/dev/null || echo 'Unknown')"
+    echo "Checkov version: $(source $PRECOMMIT_VENV/bin/activate && checkov --version 2>/dev/null || echo 'Unknown')"
+}
 
-# Global Git Hook Setup
-git config --global init.templateDir ~/.git-template
-mkdir -p ~/.git-template/hooks
-pre-commit init-templatedir ~/.git-template
+# Detect OS
+detect_os
 
-cat > ~/.git-template/hooks/pre-commit <<EOL
-#!/bin/sh
-export PRE_COMMIT_HOME=/root
-pre-commit run --config /root/.pre-commit-config.yaml --all-files
-pre-commit run --config /root/.pre-commit-hooks.yaml --all-files
-EOL
-chmod +x ~/.git-template/hooks/pre-commit
+# Menu
+echo "Select an option:"
+echo "1) Install Packages"
+echo "2) Remove Installed Packages"
+read -p "Enter your choice: " choice
 
-git init
-
+case "$choice" in
+    1)
+        for package in "${PACKAGES[@]}"; do
+            install_package "$package"
+        done
+        install_precommit_checkov
+        show_installed_versions
+        ;;
+    2)
+        echo "Removing all installed packages..."
+        for package in "${PACKAGES[@]}"; do
+            sudo apt-get remove --purge -y "$package" 2>/dev/null || echo "$package not found"
+        done
+        rm -rf "$PRECOMMIT_VENV"
+        sudo apt-get autoremove -y
+        ;;
+    *)
+        echo "Invalid option. Exiting..."
+        ;;
+esac
