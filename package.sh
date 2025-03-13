@@ -113,7 +113,7 @@ install_precommit_checkov() {
     echo "Checkov version: $(checkov --version 2>/dev/null || echo 'Unknown')"
     deactivate
     echo "Pre-commit and Checkov installed in virtual environment at $PRECOMMIT_VENV"
-    
+
     # Create pre-commit config files
     cat > "$HOME/.pre-commit-config.yaml" <<EOL
 repos:
